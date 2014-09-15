@@ -48,6 +48,7 @@ from mapreduce import mapreduce_pipeline
 from mapreduce import operation as op
 from mapreduce import shuffler
 
+from collections import Counter
 
 class FileMetadata(db.Model):
   """A helper class that will hold metadata for the user's blobs.
@@ -168,6 +169,8 @@ class IndexHandler(webapp2.RequestHandler):
 
     if self.request.get("question_1"):
       pipeline = SISL2MostPopularPipeline(filekey, blob_key)
+    elif self.request.get("question_2"):
+      pipeline = SISL2MaxUsersPipeline(filekey, blob_key)
     elif self.request.get("word_count"):
       pipeline = WordCountPipeline(filekey, blob_key)
     elif self.request.get("index"):
@@ -209,7 +212,7 @@ def sisl2_most_popular_map(data):
       mac_id = data[1]
       location_id = data[2]
     except IndexError:
-      continue
+      continue #line was empty
 
     if timestamp[11:13] == "12" and location_id in SIS_L2_CLSRMS:
       room_name = SIS_L2_CLSRMS_NAME[SIS_L2_CLSRMS.index(location_id)]
@@ -218,6 +221,41 @@ def sisl2_most_popular_map(data):
 def sisl2_most_popular_reduce(key, values):
   """Determine most popular SIS LR classroom reduce function."""
   yield "%s: %d\n" % (key, len(set(values)))
+
+
+def sisl2_max_user_map(data):
+  """Determine SIS L2 classroom with max users per day map function."""
+  (entry, text_fn) = data
+  text = text_fn()
+
+  logging.debug("Got %s", entry.filename)
+  # e.g. 2014-02-01 00:00:38,34faeb58d58db27491c85ba8e683c0cc6764dc84,1010400001,-9900,3,3
+  for record in text.split("\n"):
+    data = record.split(",")
+    try:
+      timestamp = data[0]
+      mac_id = data[1]
+      location_id = data[2]
+    except IndexError:
+      continue #line was empty
+
+    if timestamp[11:13] == "12" and location_id in SIS_L2_CLSRMS:
+      date = timestamp[0:10]
+      room_name = SIS_L2_CLSRMS_NAME[SIS_L2_CLSRMS.index(location_id)]
+      yield (room_name,  (date + "," + mac_id))
+
+def sisl2_max_user_reduce(key, values):
+  """Determine SIS L2 classroom with max users per day reduce function."""
+  unique_user_day = set(values) # to get unique users in each room in each day
+
+  days = []
+  for user_day in unique_user_day:
+    days.append(user_day[0:user_day.index(",")]) #we just want the date
+
+  max_count = Counter(days).most_common(1)[0][1]
+
+  yield "%s: %d\n" % (key, max_count)
+
 
 def word_count_map(data):
   """Word count map function."""
@@ -309,6 +347,32 @@ class SISL2MostPopularPipeline(base_handler.PipelineBase):
         },
         shards=16)
     yield StoreOutput("Question1", filekey, output)
+
+class SISL2MaxUsersPipeline(base_handler.PipelineBase):
+  """A pipeline to determine which SIS level 2 classroom has the highest
+  number of users per day from 12:00:00 to 13:00:00.
+
+  Args:
+    blobkey: blobkey to process as string. Should be a zip archive with
+      csv files inside.
+  """
+
+  def run(self, filekey, blobkey):
+    logging.debug("filename is %s" % filekey)
+    output = yield mapreduce_pipeline.MapreducePipeline(
+        "question_2",
+        "main.sisl2_max_user_map",
+        "main.sisl2_max_user_reduce",
+        "mapreduce.input_readers.BlobstoreZipInputReader",
+        "mapreduce.output_writers.BlobstoreOutputWriter",
+        mapper_params={
+            "blob_key": blobkey,
+        },
+        reducer_params={
+            "mime_type": "text/plain",
+        },
+        shards=16)
+    yield StoreOutput("Question2", filekey, output)
 
 class WordCountPipeline(base_handler.PipelineBase):
   """A pipeline to run Word count demo.
@@ -409,6 +473,8 @@ class StoreOutput(base_handler.PipelineBase):
       m.phrases_link = output[0]
     elif mr_type == "Question1":
       m.question_1_link = output[0]
+    elif mr_type == "Question2":
+      m.question_2_link = output[0]
 
     m.put()
 

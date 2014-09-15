@@ -19,6 +19,7 @@
           <td>source</td>
           <td>wordcount link</td>
           <td>question 1 link</td>
+          <td>question 2 link</td>
           <td>index link</td>
           <td>phrases link</td>
         </tr>
@@ -37,6 +38,11 @@
           <td>
             {% if item.question_1_link %}
             <a href="{{ item.question_1_link }}">question1</a>
+            {% endif %}
+          </td>
+          <td>
+            {% if item.question_2_link %}
+            <a href="{{ item.question_2_link }}">question2</a>
             {% endif %}
           </td>
           <td>
@@ -84,6 +90,7 @@
           <tr>
             <td><input type="submit" id="word_count" name="word_count" value="Word Count" disabled="true"></td>
             <td><input type="submit" id="question_1" name="question_1" value="Question1" disabled="true"></td>
+            <td><input type="submit" id="question_2" name="question_2" value="Question2" disabled="true"></td>
             <td><input type="submit" id="index" name="index" value="Index" disabled="true"></td>
             <td><input type="submit" id="phrases" name="phrases" value="Phrases" disabled="true"></td>
           </tr>
