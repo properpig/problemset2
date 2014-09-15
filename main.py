@@ -242,19 +242,19 @@ def sisl2_max_user_map(data):
     if timestamp[11:13] == "12" and location_id in SIS_L2_CLSRMS:
       date = timestamp[0:10]
       room_name = SIS_L2_CLSRMS_NAME[SIS_L2_CLSRMS.index(location_id)]
-      yield (room_name,  (date + "," + mac_id))
+      yield (date, room_name + "," + mac_id)
 
 def sisl2_max_user_reduce(key, values):
   """Determine SIS L2 classroom with max users per day reduce function."""
-  unique_user_day = set(values) # to get unique users in each room in each day
+  unique_room_user = set(values) # to get unique users in each room in each day
 
-  days = []
-  for user_day in unique_user_day:
-    days.append(user_day[0:user_day.index(",")]) #we just want the date
+  room = []
+  for room_user in unique_room_user:
+    room.append(room_user[0:room_user.index(",")]) #we just want the room
 
-  max_count = Counter(days).most_common(1)[0][1]
+  max_users = Counter(room).most_common(1)[0]
 
-  yield "%s: %d\n" % (key, max_count)
+  yield "%s: %s\n" % (key, max_users[0] + " - " + str(max_users[1]))
 
 
 def word_count_map(data):
