@@ -50,6 +50,8 @@ from mapreduce import shuffler
 
 from collections import Counter
 
+NUM_SHARDS = 1
+
 class FileMetadata(db.Model):
   """A helper class that will hold metadata for the user's blobs.
 
@@ -72,9 +74,6 @@ class FileMetadata(db.Model):
   uploadedOn = db.DateTimeProperty()
   source = db.StringProperty()
   blobkey = db.StringProperty()
-  wordcount_link = db.StringProperty()
-  index_link = db.StringProperty()
-  phrases_link = db.StringProperty()
   question_1_link = db.StringProperty()
   question_2_link = db.StringProperty()
   question_3_link = db.StringProperty()
@@ -171,29 +170,11 @@ class IndexHandler(webapp2.RequestHandler):
       pipeline = SISL2MostPopularPipeline(filekey, blob_key)
     elif self.request.get("question_2"):
       pipeline = SISL2MaxUsersPipeline(filekey, blob_key)
-    elif self.request.get("word_count"):
-      pipeline = WordCountPipeline(filekey, blob_key)
-    elif self.request.get("index"):
-      pipeline = IndexPipeline(filekey, blob_key)
-    else:
-      pipeline = PhrasesPipeline(filekey, blob_key)
+    elif self.request.get("question_3"):
+      pipeline = SISL3MostPopularHr(filekey, blob_key)
 
     pipeline.start()
     self.redirect(pipeline.base_path + "/status?root=" + pipeline.pipeline_id)
-
-
-def split_into_sentences(s):
-  """Split text into list of sentences."""
-  s = re.sub(r"\s+", " ", s)
-  s = re.sub(r"[\\.\\?\\!]", "\n", s)
-  return s.split("\n")
-
-
-def split_into_words(s):
-  """Split a sentence into list of words."""
-  s = re.sub(r"\W+", " ", s)
-  s = re.sub(r"[_0-9]+", " ", s)
-  return s.split()
 
 SIS_L2_CLSRMS = ['1010200068', '1010200069', '1010200070', '1010200071', '1010200072', '1010200073', '1010200074', '1010200075', '1010200076', '1010200077', '1010200078', '1010200079', '1010200080', '1010200081', '1010200082', '1010200089', '1010200090', '1010200091', '1010200092', '1010200093', '1010200094', '1010200095', '1010200096', '1010200097', '1010200098', '1010200099', '1010200100', '1010200101', '1010200102', '1010200103', '1010200104', '1010200105', '1010200106', '1010200107', '1010200108', '1010200109', '1010200110', '1010200111', '1010200112', '1010200113', '1010200114', '1010200115', '1010200116', '1010200117', '1010200118', '1010200119', '1010200120', '1010200121', '1010200122', '1010200123', '1010200124', '1010200125']
 SIS_L2_CLSRMS_NAME = ['SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-4', 'SMUSISL2SR2-3', 'SMUSISL2SR2-3', 'SMUSISL2SR2-3', 'SMUSISL2SR2-3', 'SMUSISL2SR2-3', 'SMUSISL2SR2-3', 'SMUSISL2SR2-3', 'SMUSISL2SR2-3', 'SMUSISL2SR2-3', 'SMUSISL2SR2-3', 'SMUSISL2SR2-3', 'SMUSISL2SR2-2', 'SMUSISL2SR2-2', 'SMUSISL2SR2-2', 'SMUSISL2SR2-2', 'SMUSISL2SR2-2', 'SMUSISL2SR2-2', 'SMUSISL2SR2-2', 'SMUSISL2SR2-2', 'SMUSISL2SR2-2', 'SMUSISL2SR2-2', 'SMUSISL2SR2-2', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1', 'SMUSISL2SR2-1']
@@ -256,71 +237,31 @@ def sisl2_max_user_reduce(key, values):
 
   yield "%s: %s\n" % (key, max_users[0] + " - " + str(max_users[1]))
 
+SIS_L3_CLSRM31 = ['1010300123', '1010300124', '1010300125', '1010300126', '1010300127', '1010300128', '1010300129', '1010300130', '1010300131', '1010300132', '1010300133', '1010300134', '1010300135', '1010300136', '1010300137']
 
-def word_count_map(data):
-  """Word count map function."""
+def sisl3_most_popular_hour_map(data):
+  """Determine most popular hour of SIS L3 CR function."""
   (entry, text_fn) = data
   text = text_fn()
 
   logging.debug("Got %s", entry.filename)
-  for s in split_into_sentences(text):
-    for w in split_into_words(s.lower()):
-      yield (w, "")
+  # e.g. 2014-02-01 00:00:38,34faeb58d58db27491c85ba8e683c0cc6764dc84,1010400001,-9900,3,3
+  for record in text.split("\n"):
+    data = record.split(",")
+    try:
+      timestamp = data[0]
+      mac_id = data[1]
+      location_id = data[2]
+    except IndexError:
+      continue #line was empty
 
+    if location_id in SIS_L3_CLSRM31:
+      hour = timestamp[11:13]
+      yield (hour, mac_id)
 
-def word_count_reduce(key, values):
-  """Word count reduce function."""
-  yield "%s: %d\n" % (key, len(values))
-
-
-def index_map(data):
-  """Index demo map function."""
-  (entry, text_fn) = data
-  text = text_fn()
-
-  logging.debug("Got %s", entry.filename)
-  for s in split_into_sentences(text):
-    for w in split_into_words(s.lower()):
-      yield (w, entry.filename)
-
-
-def index_reduce(key, values):
-  """Index demo reduce function."""
-  yield "%s: %s\n" % (key, list(set(values)))
-
-
-PHRASE_LENGTH = 4
-
-
-def phrases_map(data):
-  """Phrases demo map function."""
-  (entry, text_fn) = data
-  text = text_fn()
-  filename = entry.filename
-
-  logging.debug("Got %s", filename)
-  for s in split_into_sentences(text):
-    words = split_into_words(s.lower())
-    if len(words) < PHRASE_LENGTH:
-      yield (":".join(words), filename)
-      continue
-    for i in range(0, len(words) - PHRASE_LENGTH):
-      yield (":".join(words[i:i+PHRASE_LENGTH]), filename)
-
-
-def phrases_reduce(key, values):
-  """Phrases demo reduce function."""
-  if len(values) < 10:
-    return
-  counts = {}
-  for filename in values:
-    counts[filename] = counts.get(filename, 0) + 1
-
-  words = re.sub(r":", " ", key)
-  threshold = len(values) / 2
-  for filename, count in counts.items():
-    if count > threshold:
-      yield "%s:%s\n" % (words, filename)
+def sisl3_most_popular_hour_reduce(key, values):
+  """Determine most popular hour of SIS L3 CR reduce function."""
+  yield "%s: %d\n" % (key, len(set(values)))
 
 class SISL2MostPopularPipeline(base_handler.PipelineBase):
   """A pipeline to determine which SIS level 2 classroom is the most popular
@@ -345,7 +286,7 @@ class SISL2MostPopularPipeline(base_handler.PipelineBase):
         reducer_params={
             "mime_type": "text/plain",
         },
-        shards=16)
+        shards=NUM_SHARDS)
     yield StoreOutput("Question1", filekey, output)
 
 class SISL2MaxUsersPipeline(base_handler.PipelineBase):
@@ -371,23 +312,24 @@ class SISL2MaxUsersPipeline(base_handler.PipelineBase):
         reducer_params={
             "mime_type": "text/plain",
         },
-        shards=16)
+        shards=NUM_SHARDS)
     yield StoreOutput("Question2", filekey, output)
 
-class WordCountPipeline(base_handler.PipelineBase):
-  """A pipeline to run Word count demo.
+class SISL3MostPopularHr(base_handler.PipelineBase):
+  """A pipeline to determine which hour the SIS Level 3 classroom 3-1 is the
+  most popular.
 
   Args:
     blobkey: blobkey to process as string. Should be a zip archive with
-      text files inside.
+      csv files inside.
   """
 
   def run(self, filekey, blobkey):
     logging.debug("filename is %s" % filekey)
     output = yield mapreduce_pipeline.MapreducePipeline(
-        "word_count",
-        "main.word_count_map",
-        "main.word_count_reduce",
+        "question_3",
+        "main.sisl3_most_popular_hour_map",
+        "main.sisl3_most_popular_hour_reduce",
         "mapreduce.input_readers.BlobstoreZipInputReader",
         "mapreduce.output_writers.BlobstoreOutputWriter",
         mapper_params={
@@ -396,60 +338,8 @@ class WordCountPipeline(base_handler.PipelineBase):
         reducer_params={
             "mime_type": "text/plain",
         },
-        shards=16)
-    yield StoreOutput("WordCount", filekey, output)
-
-
-class IndexPipeline(base_handler.PipelineBase):
-  """A pipeline to run Index demo.
-
-  Args:
-    blobkey: blobkey to process as string. Should be a zip archive with
-      text files inside.
-  """
-
-
-  def run(self, filekey, blobkey):
-    output = yield mapreduce_pipeline.MapreducePipeline(
-        "index",
-        "main.index_map",
-        "main.index_reduce",
-        "mapreduce.input_readers.BlobstoreZipInputReader",
-        "mapreduce.output_writers.BlobstoreOutputWriter",
-        mapper_params={
-            "blob_key": blobkey,
-        },
-        reducer_params={
-            "mime_type": "text/plain",
-        },
-        shards=16)
-    yield StoreOutput("Index", filekey, output)
-
-
-class PhrasesPipeline(base_handler.PipelineBase):
-  """A pipeline to run Phrases demo.
-
-  Args:
-    blobkey: blobkey to process as string. Should be a zip archive with
-      text files inside.
-  """
-
-  def run(self, filekey, blobkey):
-    output = yield mapreduce_pipeline.MapreducePipeline(
-        "phrases",
-        "main.phrases_map",
-        "main.phrases_reduce",
-        "mapreduce.input_readers.BlobstoreZipInputReader",
-        "mapreduce.output_writers.BlobstoreOutputWriter",
-        mapper_params={
-            "blob_key": blobkey,
-        },
-        reducer_params={
-            "mime_type": "text/plain",
-        },
-        shards=16)
-    yield StoreOutput("Phrases", filekey, output)
-
+        shards=NUM_SHARDS)
+    yield StoreOutput("Question3", filekey, output)
 
 class StoreOutput(base_handler.PipelineBase):
   """A pipeline to store the result of the MapReduce job in the database.
@@ -465,16 +355,12 @@ class StoreOutput(base_handler.PipelineBase):
     key = db.Key(encoded=encoded_key)
     m = FileMetadata.get(key)
 
-    if mr_type == "WordCount":
-      m.wordcount_link = output[0]
-    elif mr_type == "Index":
-      m.index_link = output[0]
-    elif mr_type == "Phrases":
-      m.phrases_link = output[0]
-    elif mr_type == "Question1":
+    if mr_type == "Question1":
       m.question_1_link = output[0]
     elif mr_type == "Question2":
       m.question_2_link = output[0]
+    elif mr_type == "Question3":
+      m.question_3_link = output[0]
 
     m.put()
 
